@@ -280,6 +280,27 @@ const ToolbarComponent: React.FC<ToolbarProps> = ({
         >
           Circle
         </button>
+
+        {/* Fill */}
+        <button
+          style={{
+            padding: "10px 15px",
+            border: "2px solid #af0202",
+            backgroundColor:
+              currentTool === "fill" && !isErasing ? "#af0202" : "#ccc",
+            borderRadius: "4px",
+            cursor: "pointer",
+            fontSize: "14px",
+            fontWeight: "bold",
+          }}
+          onClick={() => {
+            onToolChange("fill");
+            onEraserToggle(false);
+          }}
+          title="Fill"
+        >
+          🪣 Fill
+        </button>
       </div>
 
       {/* Separator */}

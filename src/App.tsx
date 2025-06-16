@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import CanvasComponent, { type CanvasRef } from "./CanvasComponent";
 import ToolbarComponent from "./ToolbarComponent";
 
-export type ToolTypes = "brush" | "line" | "rectangle" | "circle";
+export type ToolTypes = "brush" | "line" | "rectangle" | "circle" | "fill";
 
 const App = () => {
   const [selectedColor, setSelectedColor] = useState("#1e1e1e");

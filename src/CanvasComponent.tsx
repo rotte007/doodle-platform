@@ -7,6 +7,83 @@ import React, {
 } from "react";
 import type { ToolTypes } from "./App";
 
+// ★ Helpers for Fill
+const hexToRgba = (hex: string): [number, number, number, number] => {
+  const clean = hex.replace("#", "");
+  const bigint = parseInt(clean, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return [r, g, b, 255];
+};
+
+const colorsMatch = (a: Uint8ClampedArray, b: Uint8ClampedArray, idx: number): boolean =>
+  a[idx] === b[0] &&
+  a[idx + 1] === b[1] &&
+  a[idx + 2] === b[2] &&
+  a[idx + 3] === b[3];
+
+// ★ Flood-fill algorithm (stack-based)
+const floodFill = (
+  ctx: CanvasRenderingContext2D,
+  startX: number,
+  startY: number,
+  fillHex: string
+) => {
+  const canvas = ctx.canvas;
+  const width = canvas.width;
+  const height = canvas.height;
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+  const targetIdx = (Math.floor(startY) * width + Math.floor(startX)) * 4;
+  const targetColor: [number, number, number, number] = [
+    data[targetIdx],
+    data[targetIdx + 1],
+    data[targetIdx + 2],
+    data[targetIdx + 3],
+  ];
+  const fillColor = hexToRgba(fillHex);
+
+  // If clicking on same color, nothing to do
+  if (
+    targetColor[0] === fillColor[0] &&
+    targetColor[1] === fillColor[1] &&
+    targetColor[2] === fillColor[2] &&
+    targetColor[3] === fillColor[3]
+  ) {
+    return;
+  }
+
+  const stack: [number, number][] = [[startX, startY]];
+  while (stack.length) {
+    const [x, y] = stack.pop()!;
+    const xi = Math.floor(x);
+    const yi = Math.floor(y);
+    const idx = (yi * width + xi) * 4;
+
+    if (xi < 0 || xi >= width || yi < 0 || yi >= height) continue;
+    if (!colorsMatch(data, new Uint8ClampedArray(fillColor), idx) &&
+        data[idx] === targetColor[0] &&
+        data[idx + 1] === targetColor[1] &&
+        data[idx + 2] === targetColor[2] &&
+        data[idx + 3] === targetColor[3]
+    ) {
+      // fill pixel
+      data[idx] = fillColor[0];
+      data[idx + 1] = fillColor[1];
+      data[idx + 2] = fillColor[2];
+      data[idx + 3] = fillColor[3];
+      // push neighbors
+      stack.push([xi + 1, yi]);
+      stack.push([xi - 1, yi]);
+      stack.push([xi, yi + 1]);
+      stack.push([xi, yi - 1]);
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+};
+
 export type CanvasRef = {
   clearCanvas: () => void;
   undo: () => void;
@@ -49,7 +126,7 @@ const CanvasComponent = ({
     null
   );
 
-  const maxHistorySize = 20; // Limit history to save
+  const maxHistorySize = 20;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -61,12 +138,11 @@ const CanvasComponent = ({
       const ctx = canvas.getContext("2d");
       if (ctx) {
         ctx.lineCap = "round";
-        ctx.strokeStyle = "#000000"; // default stroke color
-        ctx.lineWidth = 5; // default stroke width
+        ctx.strokeStyle = "#000000";
+        ctx.lineWidth = 5;
         setCanvasContext(ctx);
       }
 
-      // Create a preview canvas
       const preview = document.createElement("canvas");
       preview.width = canvas.width;
       preview.height = canvas.height;
@@ -74,7 +150,6 @@ const CanvasComponent = ({
     }
   }, []);
 
-  // Save the initial blank canvas
   useEffect(() => {
     if (canvasContext && canvasRef.current) {
       setTimeout(() => {
@@ -89,42 +164,31 @@ const CanvasComponent = ({
 
   const saveCanvasState = useCallback(() => {
     if (canvasRef.current) {
-      const canvas = canvasRef.current;
-      const imageData = canvas.toDataURL();
-
-      setHistoryState((prevState) => {
-        const newHistory = prevState.history.slice(
-          0,
-          prevState.currentIndex + 1
-        );
-        // Add a new state
-        newHistory.push(imageData);
-
-        let newIndex = newHistory.length - 1;
-        if (newHistory.length > maxHistorySize) {
-          newHistory.shift();
-          newIndex = newHistory.length - 1;
-        }
-
+      const imageData = canvasRef.current.toDataURL();
+      setHistoryState((prev) => {
+        const history = prev.history.slice(0, prev.currentIndex + 1);
+        history.push(imageData);
+        if (history.length > maxHistorySize) history.shift();
         return {
-          history: newHistory,
-          currentIndex: newIndex,
+          history,
+          currentIndex: history.length - 1,
         };
       });
-
-      if (onUpdateUndoState) {
-        setTimeout(onUpdateUndoState, 0);
-      }
+      setTimeout(onUpdateUndoState, 0);
     }
   }, [maxHistorySize, onUpdateUndoState]);
 
   const restoreCanvasState = useCallback(
     (imageData: string) => {
       if (canvasContext && canvasRef.current) {
-        const canvas = canvasRef.current;
         const img = new Image();
         img.onload = () => {
-          canvasContext.clearRect(0, 0, canvas.width, canvas.height);
+          canvasContext.clearRect(
+            0,
+            0,
+            canvasRef.current!.width,
+            canvasRef.current!.height
+          );
           canvasContext.drawImage(img, 0, 0);
         };
         img.src = imageData;
@@ -134,17 +198,15 @@ const CanvasComponent = ({
   );
 
   useEffect(() => {
-    if (canvasContext) {
-      if (isErasing) {
-        canvasContext.globalCompositeOperation = "destination-out";
-        canvasContext.strokeStyle = "rgba(0, 0, 0, 1)"; // doesn't matter, but easy to read that eraser makes that part transparent
-      } else {
-        canvasContext.globalCompositeOperation = "source-over";
-        canvasContext.strokeStyle = selectedColor; // brush draws in selected color
-      }
-      // update the stroke color from default to selected color
-      canvasContext.lineWidth = brushSize;
+    if (!canvasContext) return;
+    if (isErasing) {
+      canvasContext.globalCompositeOperation = "destination-out";
+      canvasContext.strokeStyle = "rgba(0,0,0,1)";
+    } else {
+      canvasContext.globalCompositeOperation = "source-over";
+      canvasContext.strokeStyle = selectedColor;
     }
+    canvasContext.lineWidth = brushSize;
   }, [selectedColor, brushSize, isErasing, canvasContext]);
 
   const drawLine = (
@@ -167,7 +229,7 @@ const CanvasComponent = ({
     endY: number
   ) => {
     const width = endX - startX;
-    const height = endY - endX;
+    const height = endY - startY;
     ctx.beginPath();
     ctx.rect(startX, startY, width, height);
     ctx.stroke();
@@ -179,24 +241,19 @@ const CanvasComponent = ({
     endX: number,
     endY: number
   ) => {
-    const radius = Math.sqrt(
-      Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2)
-    );
+    const radius = Math.hypot(endX - startX, endY - startY);
     ctx.beginPath();
     ctx.arc(startX, startY, radius, 0, 2 * Math.PI);
     ctx.stroke();
   };
 
-  const getMouseCoordinates = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      return { x: 0, y: 0 };
-    }
-
+  const getMouseCoordinates = (
+    event: React.MouseEvent<HTMLCanvasElement>
+  ) => {
+    const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-
     return {
       x: (event.clientX - rect.left) * scaleX,
       y: (event.clientY - rect.top) * scaleY,
@@ -205,8 +262,14 @@ const CanvasComponent = ({
 
   const startDrawing = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!canvasContext) return;
-
     const { x, y } = getMouseCoordinates(event);
+
+    // ★ Fill tool: bucket-fill on click, then save state
+    if (currentTool === "fill") {
+      floodFill(canvasContext, x, y, selectedColor);
+      saveCanvasState();
+      return;
+    }
 
     if (currentTool === "brush") {
       canvasContext.beginPath();
@@ -215,52 +278,71 @@ const CanvasComponent = ({
     } else {
       setStartPoint({ x, y });
       setIsDrawing(true);
-      if (canvasRef.current && previewCanvas) {
-        const canvas = canvasRef.current;
-        const currentImageData = canvasContext.getImageData(
+      if (previewCanvas) {
+        const curr = canvasContext.getImageData(
           0,
           0,
-          canvas.width,
-          canvas.height
+          previewCanvas.width,
+          previewCanvas.height
         );
-        const previewCtx = previewCanvas.getContext("2d");
-        if (previewCtx) {
-          previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-          previewCtx.putImageData(currentImageData, 0, 0);
-        }
+        const pCtx = previewCanvas.getContext("2d")!;
+        pCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+        pCtx.putImageData(curr, 0, 0);
       }
     }
   };
 
   const draw = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing || !canvasContext) return;
-
     const { x, y } = getMouseCoordinates(event);
 
     if (currentTool === "brush") {
       canvasContext.lineTo(x, y);
-      canvasContext.stroke(); // draw a line
-    } else if (startPoint) {
-      if (!canvasRef.current || !previewCanvas) return;
-
-      const canvas = canvasRef.current;
-      const previewCtx = previewCanvas.getContext("2d");
-      if (!previewCtx) return;
-
-      const originalImageData = previewCtx.getImageData(
+      canvasContext.stroke();
+    } else if (startPoint && previewCanvas) {
+      const pCtx = previewCanvas.getContext("2d")!;
+      const snapshot = pCtx.getImageData(
         0,
         0,
         previewCanvas.width,
         previewCanvas.height
       );
-      canvasContext.clearRect(0, 0, canvas.width, canvas.height);
-      canvasContext.putImageData(originalImageData, 0, 0);
-
-      const originalStrokeStyle = canvasContext.strokeStyle;
-      const originalLineWidth = canvasContext.lineWidth;
-      const originalCompositeOperation = canvasContext.globalCompositeOperation;
+      canvasContext.clearRect(0, 0, canvasRef.current!.width, canvasRef.current!.height);
+      canvasContext.putImageData(snapshot, 0, 0);
 
       canvasContext.globalAlpha = 0.7;
+      switch (currentTool) {
+        case "line":
+          drawLine(canvasContext, startPoint.x, startPoint.y, x, y);
+          break;
+        case "rectangle":
+          drawRectangle(canvasContext, startPoint.x, startPoint.y, x, y);
+          break;
+        case "circle":
+          drawCircle(canvasContext, startPoint.x, startPoint.y, x, y);
+          break;
+      }
+      canvasContext.globalAlpha = 1.0;
+    }
+  };
+
+  const stopDrawing = (event?: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!canvasContext) return;
+    if (!isDrawing) return;
+
+    if (currentTool === "brush") {
+      canvasContext.closePath();
+    } else if (startPoint && event) {
+      const { x, y } = getMouseCoordinates(event);
+      const pCtx = previewCanvas!.getContext("2d")!;
+      const snapshot = pCtx.getImageData(
+        0,
+        0,
+        previewCanvas!.width,
+        previewCanvas!.height
+      );
+      canvasContext.clearRect(0, 0, canvasRef.current!.width, canvasRef.current!.height);
+      canvasContext.putImageData(snapshot, 0, 0);
 
       switch (currentTool) {
         case "line":
@@ -273,101 +355,42 @@ const CanvasComponent = ({
           drawCircle(canvasContext, startPoint.x, startPoint.y, x, y);
           break;
       }
-
-      canvasContext.globalAlpha = 1.0;
-      canvasContext.strokeStyle = originalStrokeStyle;
-      canvasContext.lineWidth = originalLineWidth;
-      canvasContext.globalCompositeOperation = originalCompositeOperation;
+      setStartPoint(null);
     }
-  };
 
-  const stopDrawing = (event?: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!canvasContext) return;
-
-    if (isDrawing) {
-      if (currentTool === "brush") {
-        canvasContext.closePath(); // close the current drawing path
-      } else if (startPoint && event) {
-        const { x, y } = getMouseCoordinates(event);
-
-        if (canvasRef.current && previewCanvas) {
-          const canvas = canvasRef.current;
-          const previewCtx = previewCanvas.getContext("2d");
-          if (previewCtx) {
-            const originalImageData = previewCtx.getImageData(
-              0,
-              0,
-              previewCanvas.width,
-              previewCanvas.height
-            );
-            canvasContext.clearRect(0, 0, canvas.width, canvas.height);
-            canvasContext.putImageData(originalImageData, 0, 0);
-          }
-        }
-        switch (currentTool) {
-          case "line":
-            drawLine(canvasContext, startPoint.x, startPoint.y, x, y);
-            break;
-          case "rectangle":
-            drawRectangle(canvasContext, startPoint.x, startPoint.y, x, y);
-            break;
-          case "circle":
-            drawCircle(canvasContext, startPoint.x, startPoint.y, x, y);
-            break;
-        }
-        setStartPoint(null);
-      }
-      setIsDrawing(false);
-      saveCanvasState(); // save canvas state when we stop drawing
-    }
+    setIsDrawing(false);
+    saveCanvasState();
   };
 
   useImperativeHandle(
     ref,
     () => ({
       clearCanvas: () => {
-        if (canvasContext && canvasRef.current) {
+        if (canvasContext) {
           canvasContext.clearRect(
             0,
             0,
-            canvasRef.current.width,
-            canvasRef.current.height
+            canvasRef.current!.width,
+            canvasRef.current!.height
           );
-          saveCanvasState(); // save the cleared canvas
+          saveCanvasState();
         }
       },
       undo: () => {
         if (historyState.currentIndex > 0) {
-          const prevIndex = historyState.currentIndex - 1;
-          setHistoryState((prev) => ({
-            ...prev,
-            currentIndex: prevIndex,
-          }));
-          restoreCanvasState(historyState.history[prevIndex]);
-          if (onUpdateUndoState) {
-            setTimeout(onUpdateUndoState, 0);
-          }
+          const prev = historyState.currentIndex - 1;
+          setHistoryState((h) => ({ ...h, currentIndex: prev }));
+          restoreCanvasState(historyState.history[prev]);
+          setTimeout(onUpdateUndoState, 0);
         }
       },
       canUndo: () => historyState.currentIndex > 0,
     }),
-    [
-      canvasContext,
-      historyState,
-      onUpdateUndoState,
-      restoreCanvasState,
-      saveCanvasState,
-    ]
+    [canvasContext, historyState, onUpdateUndoState, restoreCanvasState, saveCanvasState]
   );
 
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "center",
-        padding: "20px",
-      }}
-    >
+    <div style={{ display: "flex", justifyContent: "center", padding: "20px" }}>
       <canvas
         ref={canvasRef}
         id="doodleCanvas"
@@ -382,7 +405,6 @@ const CanvasComponent = ({
           backgroundColor: "#ffffff",
           width: "90vw",
           height: "80vh",
-          color: "#000000",
         }}
       >
         Your browser does not support HTML5 canvas API!
