@@ -241,7 +241,9 @@ const CanvasComponent = ({
     endX: number,
     endY: number
   ) => {
-    const radius = Math.hypot(endX - startX, endY - startY);
+    const radius = Math.sqrt(
+      Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2)
+    );
     ctx.beginPath();
     ctx.arc(startX, startY, radius, 0, 2 * Math.PI);
     ctx.stroke();
